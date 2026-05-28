@@ -200,12 +200,12 @@ const char *const Applesoft_tokens[] = {
 const unsigned char vtoc_chk_offset[VTOC_CHK_NO] =
 	{ 0x03, 0x27, 0x34, 0x35, 0x36, 0x37};
 const unsigned char vtoc_chk_value[VTOC_CHK_NO] =
-	{ 0x03, 0x7a, 0x23, 0x10, 0x00, 0x01};
+	{ 0x03, 0x7a, 0xa0, 0x15, 0x00, 0x01};
 
 FILE *from_file=NULL, *to_file=NULL, *image_fp=NULL;
 char *extfilename, *extfilemode;
 
-unsigned char padded_name[30+1], dir_entry_data[35];
+unsigned char padded_name[30], dir_entry_data[35];
 unsigned char vtocbuffer[256];
 unsigned int begun, baseaddress, rawmode, filetype, new_sectors;
 unsigned long dir_entry_pos;
@@ -219,9 +219,9 @@ void quit(int exitcode, char *exitmsg) {
     }
 
 int seek_sect (unsigned int track, unsigned int sector) {
-    if (track >= 35 || sector >= 16)
+    if (track >= 160 || sector >= 21)
 	quit(1,"seek on .dsk out of range.\n");
-    return fseek(image_fp, (track*16uL+sector)*256, SEEK_SET);
+    return fseek(image_fp, (track*21uL+sector)*256, SEEK_SET);
     }
 
 void read_sect (int track, int sector, unsigned char buffer[256]) {
@@ -240,18 +240,15 @@ int dir_do (int (*what_to_do)(unsigned char *) ) {
     unsigned char buffer[256];
     unsigned int cur_trk, cur_sec, i, found, hop;
     hop=found=0;
-    buffer[0]=0;
     buffer[1]=vtocbuffer[1];
     buffer[2]=vtocbuffer[2];
-    while(++hop < MAX_HOPS && !found && !buffer[0] && (buffer[1] || buffer[2])) {
+    while(++hop < MAX_HOPS && !found && (buffer[1] || buffer[2])) {
 	cur_trk=buffer[1];
 	cur_sec=buffer[2];
 	read_sect (buffer[1],buffer[2],buffer);
-	if (buffer[0]) return found;
 	i=0x0b;
-//	printf("--- %u.%u\n", cur_trk, cur_sec);
 	while(i<=0xdd && !(found=(*what_to_do)(&buffer[i]))) i+=35;
-	if (found) dir_entry_pos=(cur_trk*16uL+cur_sec)*256+i;
+	if (found) dir_entry_pos=(cur_trk*21uL+cur_sec)*256+i;
 	}
     if (hop >= MAX_HOPS) quit(2,"\n***Corrupted directory\n\n");
     return found;
@@ -261,13 +258,13 @@ int dir_find_name(unsigned char *buffer) {
     int j;
 
 #if 0
-    printf("comparing dir entry '");
-    for (j=3; j<33; j++)
-	printf("%c",(buffer[j] & 0x7f));
-    printf("' to padded '");
-    for (j=0; j<30; j++)
-	printf("%c",(padded_name[j]));
-    printf("'\n");
+	printf("comparing dir entry '");
+	for (j=3; j<33; j++)
+	    printf("%c",(buffer[j] & 0x7f));
+	printf("' to padded '");
+	for (j=0; j<30; j++)
+	    printf("%c",(padded_name[j]));
+	printf("'\n");
 #endif
 
     j=0;
@@ -284,7 +281,7 @@ int dir_find_space(unsigned char *buffer) {
 
 int dir_print_entry(unsigned char *buffer) {
     int j;
-    if (buffer[0]!=0xff && buffer[3]!=0) {
+    if (buffer[0]!=0xff && buffer[1]!=0) {
 	/* entry is present */
 	printf(" ");
 	if (buffer[2] & 0x80) printf("*"); else printf(" ");
@@ -302,6 +299,7 @@ int dir_print_entry(unsigned char *buffer) {
 	printf(" %03u ",buffer[33]+buffer[34]*256u);
 	for (j=3; j<33; j++)
 	    printf("%c",(buffer[j] & 0x7f));
+	printf("[t %d s %d]", buffer[0], buffer[1]);
 	printf("\n");
 	}
     return 0;
@@ -648,7 +646,6 @@ void a2in (void) {
     for (i=0;i<30;i++) dir_entry_data[i+3]=padded_name[i]|0x80;
     dir_entry_data[2]=filetype;
 
-    printf ("--- a\n");
     new_sector(&curlist_trk,&curlist_sec);
     dir_entry_data[0]=curlist_trk;
     dir_entry_data[1]=curlist_sec;
@@ -657,7 +654,6 @@ void a2in (void) {
 
     for (;;) {
 	if (!rawmode || filetype!=FILETYPE_T) {
-	    printf ("--- b\n");
 	    new_sector(&curdata_trk,&curdata_sec);
 	    listbuffer[0x0c+(listentry_pos<<1)]=curdata_trk;
 	    listbuffer[0x0d+(listentry_pos<<1)]=curdata_sec;
@@ -683,7 +679,6 @@ void a2in (void) {
 	    if (c == EOF) break;
 	    ungetc(c,from_file);
 	    }
-	printf ("--- c\n");
 	if (++listentry_pos >= 0x7a) {
 	    new_sector(&newlist_trk,&newlist_sec);
 	    listbuffer[1]=newlist_trk;
@@ -730,16 +725,16 @@ int main (int argc, char *argv[]) {
     ls_hlp=in_hlp=out_hlp=rm_hlp=general_hlp=(char *) DOS_HelpText;
 #else
     dos=0;
-    general_hlp="Invoke as a2ls, a2in, a2out, or a2rm.\n";
-    ls_cmd="a2ls";
-    ls_hlp="Usage: a2ls <disk_image>\n";
-    in_cmd="a2in";
+    general_hlp="Invoke as a7ls, a7in, a7out, or a7rm.\n";
+    ls_cmd="a7ls";
+    ls_hlp="Usage: a7ls <disk_image>\n";
+    in_cmd="a7in";
     in_hlp=
-    "Usage: a2in [-r] <type>[.<hex_addr>] <disk_image> <a2file> [<source>]\n";
-    out_cmd="a2out";
-    out_hlp="Usage: a2out [-r] <disk_image> <a2file> [<destination>]\n";
-    rm_cmd="a2rm";
-    rm_hlp="Usage: a2rm <disk_image> <a2file>\n";
+    "Usage: a7in [-r] <type>[.<hex_addr>] <disk_image> <a2file> [<source>]\n";
+    out_cmd="a7out";
+    out_hlp="Usage: a7out [-r] <disk_image> <a2file> [<destination>]\n";
+    rm_cmd="a7rm";
+    rm_hlp="Usage: a7rm <disk_image> <a2file>\n";
 #endif
 
     baseaddress=0x2000; /* default, hi-res page 1 */
@@ -833,13 +828,9 @@ int main (int argc, char *argv[]) {
 	}
 
     /* prepare source filename by padding blanks */
-#if 0
     i=0;
     while(i<30 && a2_name[i]) { padded_name[i]=a2_name[i] & 0x7f; i++; }
     while(i<30) padded_name[i++]=' ';
-#else
-    snprintf(padded_name, 31, "%-30s", a2_name);
-#endif
 
     /* get VTOC and check validity */
     read_sect(0x11, 0, vtocbuffer);
